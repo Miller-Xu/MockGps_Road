@@ -20,8 +20,8 @@ import com.huolala.mockgps.model.MockMessageModel
 import com.huolala.mockgps.model.NaviType
 import com.huolala.mockgps.server.GpsService
 import com.huolala.mockgps.utils.Utils
-import kotlinx.android.synthetic.main.activity_navi.*
 
+// 【修改点1】：删除了 kotlinx.android.synthetic... 那个报错的引用
 
 /**
  * @author jiayu.liu
@@ -42,11 +42,13 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
     }
 
     override fun initView() {
-        ClickUtils.applySingleDebouncing(iv_back, this)
+        // 【修改点2】：iv_back 改为 dataBinding.ivBack
+        ClickUtils.applySingleDebouncing(dataBinding.ivBack, this)
 
-        mBaiduMap = mapview.map
-        mapview.showScaleControl(false)
-        mapview.showZoomControls(false)
+        // 【修改点3】：mapview 改为 dataBinding.mapview
+        mBaiduMap = dataBinding.mapview.map
+        dataBinding.mapview.showScaleControl(false)
+        dataBinding.mapview.showZoomControls(false)
         mBaiduMap.uiSettings?.isCompassEnabled = false
 
         mBaiduMap.setOnMapLoadedCallback {
@@ -130,7 +132,7 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
     }
 
     private fun startMockServer(parcelable: Parcelable?) {
-        //判断  为null先启动服务  悬浮窗需要
+        // 判断  为null先启动服务  悬浮窗需要
         parcelable?.run {
             if (!Utils.isAllowMockLocation(this@MockLocationActivity)) {
                 Toast.makeText(
@@ -141,25 +143,37 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
                 return
             }
         }
-        //启动服务  定位以及悬浮窗
-        startService(Intent(this, GpsService::class.java).apply {
+
+        // 启动服务  定位以及悬浮窗
+        val serviceIntent = Intent(this, GpsService::class.java).apply {
+            // 1. 传递原有的位置信息
             parcelable?.let {
-                putExtras(
-                    Bundle().apply {
-                        putParcelable("info", it)
-                    })
+                putExtras(Bundle().apply {
+                    putParcelable("info", it)
+                })
             }
-        })
+
+            // --- 【核心转发逻辑】 ---
+            val captureMode = this@MockLocationActivity.intent.getBooleanExtra("is_capture_mode", false)
+            if (captureMode) {
+                putExtra("is_capture_mode", true)
+                putExtra("projection_data", this@MockLocationActivity.intent.getParcelableExtra<Intent>("projection_data"))
+            }
+        }
+
+        startService(serviceIntent)
     }
 
     override fun onResume() {
         super.onResume()
-        mapview.onResume()
+        // 【修改点4】：mapview 改为 dataBinding.mapview
+        dataBinding.mapview.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        mapview.onPause()
+        // 【修改点5】：mapview 改为 dataBinding.mapview
+        dataBinding.mapview.onPause()
         if (isFinishing) {
             destroy()
         }
@@ -167,12 +181,14 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
 
     private fun destroy() {
         mapLocationManager?.onDestroy()
-        mapview.onDestroy()
+        // 【修改点6】：mapview 改为 dataBinding.mapview
+        dataBinding.mapview.onDestroy()
     }
 
     override fun onClick(v: View?) {
         when (v) {
-            iv_back -> {
+            // 【修改点7】：iv_back 改为 dataBinding.ivBack
+            dataBinding.ivBack -> {
                 finish()
             }
 

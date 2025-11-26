@@ -23,7 +23,6 @@ import com.huolala.mockgps.server.GpsService
 import com.huolala.mockgps.utils.LocationUtils
 import com.huolala.mockgps.utils.MMKVUtils
 import com.huolala.mockgps.utils.Utils
-import kotlinx.android.synthetic.main.layout_navi_card.radio_multi_route
 
 /**
  * @author jiayu.liu

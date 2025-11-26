@@ -24,11 +24,39 @@ import com.huolala.mockgps.widget.NaviPathDialog
 import com.huolala.mockgps.widget.NaviPopupWindow
 import com.huolala.mockgps.widget.PointTypeDialog
 
+// --- 引用保持不变 ---
+import android.app.Activity
+import android.app.AlertDialog
+import android.content.Context
+import android.media.projection.MediaProjectionManager
+import androidx.activity.result.contract.ActivityResultContracts
+
 /**
  * @author jiayu.liu
  */
 class FileMockActivity : BaseActivity<ActivityFileBinding, BaseViewModel>(), View.OnClickListener {
     private var mPointType = LocationUtils.gcj02
+
+    // ================== 【修改点 1：必须在这里定义变量】 ==================
+    // 1. 用来暂存导航数据
+    private var pendingModel: MockMessageModel? = null
+
+    // 2. 注册权限回调（必须放在类成员位置，不能放方法里）
+    private val screenshotLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && pendingModel != null) {
+            // 权限拿到，启动 Activity
+            val intent = Intent(this, MockLocationActivity::class.java)
+            intent.putExtra("model", pendingModel)
+            // 传递截图标记和权限数据
+            intent.putExtra("is_capture_mode", true)
+            intent.putExtra("projection_data", result.data)
+            startActivity(intent)
+        } else {
+            ToastUtils.showShort("未获得录屏权限或已取消")
+        }
+    }
+    // ====================================================================
+
     override fun initViewModel(): Class<BaseViewModel> {
         return BaseViewModel::class.java
     }
@@ -39,7 +67,6 @@ class FileMockActivity : BaseActivity<ActivityFileBinding, BaseViewModel>(), Vie
 
     override fun initView() {
         KeyboardUtils.clickBlankArea2HideSoftInput()
-
 
         ClickUtils.applySingleDebouncing(dataBinding.ivNaviSetting, this)
         ClickUtils.applySingleDebouncing(dataBinding.ivWarning, this)
@@ -156,9 +183,27 @@ class FileMockActivity : BaseActivity<ActivityFileBinding, BaseViewModel>(), Vie
                         naviType = NaviType.NAVI_FILE,
                         speed = MMKVUtils.getSpeed(),
                     )
-                    val intent = Intent(this, MockLocationActivity::class.java)
-                    intent.putExtra("model", model)
-                    startActivity(intent)
+
+                    // ================== 【修改点 2：修复后的弹窗逻辑】 ==================
+                    // 使用 this@FileMockActivity 确保 Context 正确
+                    AlertDialog.Builder(this@FileMockActivity)
+                        .setTitle("启动设置")
+                        .setMessage("请选择导航模式")
+                        .setPositiveButton("截图模式(2秒/张)") { _, _ ->
+                            // 1. 存下 model 到我们刚才定义的成员变量里
+                            pendingModel = model
+                            // 2. 发起录屏权限请求
+                            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                            screenshotLauncher.launch(mpm.createScreenCaptureIntent())
+                        }
+                        .setNegativeButton("普通模式") { _, _ ->
+                            // 普通模式直接启动
+                            val intent = Intent(this@FileMockActivity, MockLocationActivity::class.java)
+                            intent.putExtra("model", model)
+                            startActivity(intent)
+                        }
+                        .show()
+                    // =================================================================
                 }
             }
 
@@ -177,5 +222,4 @@ class FileMockActivity : BaseActivity<ActivityFileBinding, BaseViewModel>(), Vie
             }
         }
     }
-
 }

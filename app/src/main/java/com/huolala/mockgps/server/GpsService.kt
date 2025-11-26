@@ -1,5 +1,8 @@
 package com.huolala.mockgps.server
 
+import com.huolala.mockgps.utils.ScreenCaptureManager // 确保这个包名和你的工具类一致
+import android.media.projection.MediaProjectionManager
+import android.app.Activity
 import android.app.Service
 import android.content.Intent
 import android.location.Criteria
@@ -40,6 +43,8 @@ class GpsService : Service() {
     private val providerStr: String = LocationManager.GPS_PROVIDER
     private val networkStr: String = LocationManager.NETWORK_PROVIDER
     private var bearing: Float = 1.0f
+    private var screenCaptureManager: ScreenCaptureManager? = null
+    private var isCaptureMode = false
 
     /**
      * 米/S
@@ -97,6 +102,20 @@ class GpsService : Service() {
                                 }
                                 FloatingViewManger.INSTANCE.updateNaviInfo(index, it.size)
                                 startSimulateLocation(mCurrentLocation!!, false)
+
+                                // --- 【新增代码：核心截图逻辑】 ---
+                                if (isCaptureMode) {
+                                    // 截图模式强制间隔 2秒
+                                    mNaviUpdateValue = 2000L
+                                    
+                                    // 稍微延迟一点点，等位置更新后再截图
+                                    mCurrentLocation?.let { loc ->
+                                        // 注意：为了不阻塞主线程，这里工具类内部已经是异步的了
+                                        screenCaptureManager?.captureAndSave(loc.latitude, loc.longitude)
+                                    }
+                                }
+                                // --- 【新增结束】 ---
+
                                 handle.sendMessageDelayed(Message.obtain(msg), mNaviUpdateValue)
                             }
                         }
@@ -274,12 +293,22 @@ class GpsService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        //开始模拟
+        // 开始模拟
         if (Utils.isAllowMockLocation(this)) {
             intent?.run {
                 getParcelableExtra<MockMessageModel?>("info")?.let {
                     model = it
                 }
+                
+                // --- 【新增代码：初始化截图工具】 ---
+                isCaptureMode = getBooleanExtra("is_capture_mode", false)
+                val pData: Intent? = getParcelableExtra("projection_data")
+                if (isCaptureMode && pData != null) {
+                    val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    val projection = mpm.getMediaProjection(Activity.RESULT_OK, pData)
+                    screenCaptureManager = ScreenCaptureManager(this@GpsService, projection)
+                }
+                // --- 【新增结束】 ---
             }
         }
         initFloatingView()
@@ -343,6 +372,10 @@ class GpsService : Service() {
         super.onDestroy()
         FloatingViewManger.INSTANCE.onDestroy()
         handle.removeCallbacksAndMessages(null)
+        
+        // --- 【新增】 ---
+        screenCaptureManager?.stop()
+        
         removeGps()
     }
 
