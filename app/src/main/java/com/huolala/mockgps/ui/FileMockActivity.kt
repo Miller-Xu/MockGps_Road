@@ -3,7 +3,7 @@ package com.huolala.mockgps.ui
 import android.content.Intent
 import android.text.TextUtils
 import android.view.View
-import com.baidu.mapapi.model.LatLng
+import com.amap.api.maps.model.LatLng
 import com.blankj.utilcode.util.ClickUtils
 import com.blankj.utilcode.util.FileIOUtils
 import com.blankj.utilcode.util.KeyboardUtils

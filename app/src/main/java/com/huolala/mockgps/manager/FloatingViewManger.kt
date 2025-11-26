@@ -13,8 +13,11 @@ import android.view.WindowManager
 import android.widget.SeekBar
 import android.widget.SeekBar.OnSeekBarChangeListener
 import androidx.constraintlayout.widget.ConstraintLayout
-import com.baidu.mapapi.map.MyLocationConfiguration
-import com.baidu.mapapi.model.LatLng
+// [修改1] 删除百度依赖，换成高德的
+// import com.baidu.mapapi.map.MyLocationConfiguration
+// import com.baidu.mapapi.model.LatLng
+import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.model.MyLocationStyle
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.ClickUtils
 import com.blankj.utilcode.util.ScreenUtils
@@ -28,6 +31,8 @@ import com.huolala.mockgps.utils.CalculationLogLatDistance
 import com.huolala.mockgps.utils.HandlerUtils
 import com.huolala.mockgps.utils.MMKVUtils
 import com.huolala.mockgps.widget.RockerView
+// [说明] 这里的 synthetic 报错，请尝试 Build -> Clean Project。
+// 只要你的 layout_floating.xml 里地图 ID 还是 @+id/mapview，这里就能用。
 import kotlinx.android.synthetic.main.layout_floating.view.*
 import kotlinx.android.synthetic.main.layout_floating_location_adjust.view.*
 import kotlinx.android.synthetic.main.layout_floating_navi_adjust.view.*
@@ -72,6 +77,7 @@ class FloatingViewManger private constructor() {
     private var curNaviType: Int = NaviType.NONE
     private var infoViewCurVisibility: Int = View.VISIBLE
     var listener: FloatingViewListener? = null
+    // [注意] 这个 MapLocationManager 类你也需要去修改，把它内部的 BaiduMap 改成 AMap
     private var mapLocationManager: MapLocationManager? = null
 
     /**
@@ -103,19 +109,32 @@ class FloatingViewManger private constructor() {
         }
         view = LayoutInflater.from(Utils.getApp()).inflate(R.layout.layout_floating, null)
 
-        view?.mapview?.onCreate(Utils.getApp(), null)
-        view?.mapview?.showScaleControl(false)
-        view?.mapview?.showZoomControls(false)
-        view?.mapview?.getChildAt(1)?.visibility = View.GONE
-        view?.mapview?.map?.let {
-            it.uiSettings?.isCompassEnabled = false
-            it.uiSettings?.setAllGesturesEnabled(false)
-            it.uiSettings?.isOverlookingGesturesEnabled = false
-            it.setOnMapLoadedCallback {
+        // [修改2] 地图初始化逻辑
+        view?.mapview?.onCreate(null) // 高德的onCreate参数通常可以是Bundle?，传null即可
+
+        // 高德地图的缩放控件是在 UiSettings 里控制的，不像百度直接在 MapView 上
+        view?.mapview?.map?.uiSettings?.let { uiSettings ->
+            uiSettings.isScaleControlsEnabled = false // 隐藏比例尺
+            uiSettings.isZoomControlsEnabled = false  // 隐藏缩放按钮
+            uiSettings.isCompassEnabled = false       // 隐藏指南针
+            // 高德没有直接的一键禁止所有手势，需要分别设置，或者只要不开启就默认支持
+            // uiSettings.setAllGesturesEnabled(false) // 高德API略有不同，通常不需要这行，或者分别禁用
+            uiSettings.isRotateGesturesEnabled = false // 禁止旋转手势
+            uiSettings.isTiltGesturesEnabled = false   // 禁止倾斜手势
+        }
+
+        // 隐藏百度/高德地图自带的logo或者其他子View（如果有的话，索引可能不同，建议先注释掉防止崩溃）
+        // view?.mapview?.getChildAt(1)?.visibility = View.GONE
+
+        view?.mapview?.map?.let { amap ->
+            // [修改3] 监听器从 Callback 变为 Listener
+            amap.setOnMapLoadedListener {
+                // [注意] 这里创建 MapLocationManager 时，传入的是 amap 对象
+                // 请务必确保 MapLocationManager 的构造函数已经改成了接收 AMap
                 mapLocationManager = MapLocationManager(
                     Utils.getApp(),
-                    it,
-                    FollowMode.MODE_PERSISTENT,
+                    amap,
+                    FollowMode.MODE_PERSISTENT, // 这个枚举如果在这个文件没报错就不用动
                     Source.FLOATING
                 )
             }
@@ -438,7 +457,9 @@ class FloatingViewManger private constructor() {
                     }
                     addAdjustLocationToWindow()
                 }
-                mapLocationManager?.setLocationMode(MyLocationConfiguration.LocationMode.NORMAL)
+                // [修改4] 定位模式：普通定位 (高德对应 LOCATION_TYPE_LOCATE 或 LOCATION_TYPE_SHOW)
+                // 假设 MapLocationManager 已修改为接收 int 类型作为模式
+                mapLocationManager?.setLocationMode(MyLocationStyle.LOCATION_TYPE_LOCATE)
             }
 
             NaviType.NAVI, NaviType.NAVI_FILE -> {
@@ -450,7 +471,9 @@ class FloatingViewManger private constructor() {
                     addAdjustNaviToWindow()
                     naviAdjust?.btn_change_location?.visibility = View.INVISIBLE
                 }
-                mapLocationManager?.setLocationMode(MyLocationConfiguration.LocationMode.COMPASS)
+                // [修改5] 定位模式：罗盘/跟随模式 (高德对应 LOCATION_TYPE_MAP_ROTATE 或 LOCATION_TYPE_LOCATION_ROTATE)
+                mapLocationManager?.setLocationMode(MyLocationStyle.LOCATION_TYPE_MAP_ROTATE)
+
                 //清空等待  更新当前速度信息
                 naviAdjust?.speed_nav_view?.clearLongClickWait()
                 naviAdjust?.speed_nav_view?.updateCurValue(MMKVUtils.getSpeed())
@@ -459,7 +482,7 @@ class FloatingViewManger private constructor() {
                         if (it.isEmpty()) {
                             return
                         }
-
+                        // [注意] MapDrawUtils 也是自定义类，需要修改里面的方法参数为 AMap
                         MapDrawUtils.drawLineToMap(
                             map,
                             it,

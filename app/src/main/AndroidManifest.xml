@@ -3,11 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.huolala.mockgps">
 
-    <!--允许程序访问WiFi网络信息-->
+    <!-- === 权限配置 (高德和百度基本通用，保持不变) === -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <!--允许程序读写手机状态和身份-->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <!--允许程序访问CellID或WiFi热点来获取粗略的位置-->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
@@ -15,22 +13,19 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
-    <!--震动-->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission
         android:name="android.permission.ACCESS_MOCK_LOCATION"
         tools:ignore="MockLocation,ProtectedPermissions" />
-    <!-- 访问网络，进行地图相关业务数据请求，包括地图数据，路线规划，POI检索等 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 获取网络状态，根据网络状态切换进行数据请求网络转换 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 读写权限 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <!-- 保持后台运行和录屏服务 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Android 14 (API 34) 必须声明具体的服务类型 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- 高德建议补充的权限 (可选，为了定位更准建议加上) -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
     <application
         android:name=".MyApp"
@@ -40,24 +35,23 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MockGps">
+        android:theme="@style/Theme.MockGps"
+        android:usesCleartextTraffic="true">
 
+        <!-- UI适配配置 (保持不变) -->
         <meta-data
             android:name="design_width_in_dp"
             android:value="375" />
         <meta-data
             android:name="design_height_in_dp"
             android:value="667" />
-
         <meta-data
-            android:name="com.baidu.lbsapi.API_KEY"
-            android:value="${MAP_KEY}" />
+            android:name="com.amap.api.v2.apikey"
+            android:value="645ce15431c5f15fcc2ffdf9f5059b76" />
 
-        <service
-            android:name="com.baidu.location.f"
-            android:enabled="true"
-            android:process=":remote" />
+        <service android:name="com.amap.api.location.APSService" />
 
+        <!-- 下面的 Activity 保持不变 -->
         <activity
             android:name=".ui.GuideActivity"
             android:exported="true"
@@ -65,7 +59,6 @@
             tools:ignore="LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
@@ -107,6 +100,7 @@
             android:screenOrientation="portrait"
             tools:ignore="LockedOrientationActivity" />
 
+        <!-- 这里的 GpsService 是项目自己写的模拟服务，不是百度的，所以不要动 -->
         <service
             android:name=".server.GpsService"
             android:exported="false"

@@ -10,7 +10,8 @@ import android.location.Location
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
 import android.os.*
-import com.baidu.mapapi.model.LatLng
+//import com.baidu.mapapi.model.LatLng
+import com.amap.api.maps.model.LatLng
 import com.blankj.utilcode.util.ToastUtils
 import com.huolala.mockgps.manager.FloatingViewManger
 import com.huolala.mockgps.manager.SearchManager

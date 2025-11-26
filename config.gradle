@@ -7,7 +7,7 @@ ext {
             targetSdkVersion : 31,
             versionCode      : 255,
             versionName      : '2.5.5',
-            map_key          : 'lmSE5lD0ZXcSAuNs34A2DXQdIzaDI8GR',
+            map_key          : '645ce15431c5f15fcc2ffdf9f5059b76',
     ]
 
     support = [

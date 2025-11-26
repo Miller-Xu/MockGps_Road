@@ -6,8 +6,12 @@ import android.text.TextUtils
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatTextView
-import com.baidu.mapapi.map.*
-import com.baidu.mapapi.search.route.*
+import android.widget.Toast
+// [修改1] 导入高德相关类
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.LatLng
+import com.amap.api.services.route.DrivePath
 import com.blankj.utilcode.util.*
 import com.castiel.common.base.BaseActivity
 import com.castiel.common.base.BaseViewModel
@@ -16,20 +20,21 @@ import com.huolala.mockgps.databinding.ActivityCalculateRouteBinding
 import com.huolala.mockgps.manager.FollowMode
 import com.huolala.mockgps.manager.MapLocationManager
 import com.huolala.mockgps.manager.SearchManager
-import com.huolala.mockgps.manager.utils.MapConvertUtils
 import com.huolala.mockgps.manager.utils.MapDrawUtils
 import com.huolala.mockgps.model.PoiInfoModel
 import com.huolala.mockgps.model.PoiInfoType
 import java.io.File
 import kotlin.collections.ArrayList
 
-
 /**
  * @author jiayu.liu
+ * 已适配高德地图 (AMap)
  */
 class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseViewModel>(),
     View.OnClickListener {
-    private lateinit var mBaiduMap: BaiduMap
+
+    // [修改2] 变量改为 AMap
+    private lateinit var aMap: AMap
     private var mapLocationManager: MapLocationManager? = null
     private val mDefaultPadding = ConvertUtils.dp2px(50f)
     private var mainIndex = 0
@@ -37,34 +42,44 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
     /**
      * 算路成功的路线
      */
-    private var routeLines: ArrayList<DrivingRouteLine> = arrayListOf()
-    private val mSearchManagerListener  = object : SearchManager.SearchManagerListener {
-        override fun onDrivingRouteResultLines(routeLines: List<DrivingRouteLine>?) {
+    // [修改3] 列表泛型改为 DrivePath
+    private var routeLines: ArrayList<DrivePath> = arrayListOf()
+
+    private val mSearchManagerListener = object : SearchManager.SearchManagerListener {
+        // [修改4] 回调参数改为 List<DrivePath>
+        override fun onDrivingRouteResultLines(routeLines: List<DrivePath>?) {
             viewModel.loading.value = false
             if (routeLines?.isEmpty() != false) {
                 ToastUtils.showShort("路线规划数据获取失败,请检测网络or数据是否正确!")
                 return
             }
-            this@CalculateRouteActivity.routeLines = routeLines as ArrayList<DrivingRouteLine>
-            mBaiduMap.let {
+            this@CalculateRouteActivity.routeLines = routeLines as ArrayList<DrivePath>
+
+            // [修改5] 绘制逻辑
+            aMap.let { map ->
+                // 绘制起点 Marker
                 (dataBinding.tvStart.tag as PoiInfoModel?)?.latLng?.let { start ->
-                    MapDrawUtils.drawMarkerToMap(it, start, "marker_start.png")
+                    MapDrawUtils.drawMarkerToMap(map, start, "marker_start.png")
                 }
+                // 绘制终点 Marker
                 (dataBinding.tvEnd.tag as PoiInfoModel?)?.latLng?.let { end ->
-                    MapDrawUtils.drawMarkerToMap(it, end, "marker_end.png")
+                    MapDrawUtils.drawMarkerToMap(map, end, "marker_end.png")
                 }
 
                 routeLines.mapIndexed { index, line ->
+                    // [关键修改] 解析 DrivePath 为 List<LatLng>
+                    val latLngList = parseDrivePath(line)
+
                     MapDrawUtils.drawLineToMap(
-                        it,
-                        MapConvertUtils.convertLatLngList(line),
+                        map,
+                        latLngList,
                         Rect(
                             mDefaultPadding,
                             mDefaultPadding + dataBinding.clPanel.height,
                             mDefaultPadding,
                             mDefaultPadding
                         ),
-                        index == mainIndex
+                        index == mainIndex // 只高亮显示当前选中的那条
                     )
                 }
             }
@@ -102,8 +117,6 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
     override fun initView() {
         initMap()
 
-        System.currentTimeMillis()
-
         ClickUtils.applySingleDebouncing(dataBinding.tvStart, this)
         ClickUtils.applySingleDebouncing(dataBinding.tvEnd, this)
         ClickUtils.applySingleDebouncing(dataBinding.btnChange, this)
@@ -113,12 +126,14 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
 
 
     private fun initMap() {
+        if (dataBinding.mapview.map == null) return
+        aMap = dataBinding.mapview.map
 
-        mBaiduMap = dataBinding.mapview.map
+        // [修改6] 设置默认缩放级别
+        aMap.moveCamera(CameraUpdateFactory.zoomTo(16f))
 
-        mBaiduMap.setMapStatus(MapStatusUpdateFactory.zoomBy(16f))
-
-        mapLocationManager = MapLocationManager(this, mBaiduMap, FollowMode.MODE_SINGLE)
+        // [修改7] 初始化定位管理器
+        mapLocationManager = MapLocationManager(this, aMap, FollowMode.MODE_SINGLE)
     }
 
 
@@ -157,24 +172,29 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
             }
 
             dataBinding.btnStartRoute -> {
-                var stNode: PlanNode? = null
+                // [修改8] 不再使用 PlanNode，直接取 LatLng
+                var stLatLng: LatLng? = null
                 (dataBinding.tvStart.tag as PoiInfoModel?)?.run {
-                    stNode = PlanNode.withLocation(latLng);
+                    stLatLng = latLng
                 }
 
-                var enNode: PlanNode? = null
+                var enLatLng: LatLng? = null
                 (dataBinding.tvEnd.tag as PoiInfoModel?)?.run {
-                    enNode = PlanNode.withLocation(latLng);
+                    enLatLng = latLng
                 }
 
-                if (stNode == null || enNode == null) {
+                if (stLatLng == null || enLatLng == null) {
                     ToastUtils.showShort("起终点不能null")
                     return
                 }
-                mBaiduMap.clear()
+
+                // 清空地图和缓存列表
+                aMap.clear()
                 routeLines.clear()
                 viewModel.loading.value = true
-                SearchManager.INSTANCE.driverSearch(stNode?.location, enNode?.location, true)
+
+                // 发起搜索
+                SearchManager.INSTANCE.driverSearch(stLatLng, enLatLng, true)
             }
 
             dataBinding.btnChange -> {
@@ -182,14 +202,17 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
                     ToastUtils.showShort("没有路线切换")
                     return
                 }
-                mBaiduMap.clear()
+                aMap.clear()
 
                 mainIndex = ++mainIndex % routeLines.size
-                mBaiduMap.let {
+
+                // 重新绘制，根据 mainIndex 高亮
+                aMap.let { map ->
                     routeLines.mapIndexed { index, line ->
+                        val latLngList = parseDrivePath(line)
                         MapDrawUtils.drawLineToMap(
-                            it,
-                            MapConvertUtils.convertLatLngList(line),
+                            map,
+                            latLngList,
                             Rect(
                                 mDefaultPadding,
                                 mDefaultPadding + dataBinding.clPanel.height,
@@ -208,7 +231,10 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
                     ToastUtils.showShort("数据列表为null！，无法保存")
                     return
                 }
-                val convertLatLngList = MapConvertUtils.convertLatLngList(routeLines[mainIndex])
+
+                // [修改9] 解析当前选中的路线为点串
+                val convertLatLngList = parseDrivePath(routeLines[mainIndex])
+
                 val builder = StringBuilder()
                 convertLatLngList.map {
                     builder.append(it.longitude).append(",").append(it.latitude).append(";")
@@ -272,5 +298,21 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
                 }
             }
         }
+    }
+
+    /**
+     * [辅助方法] 将 DrivePath 解析为 List<LatLng>
+     * 原本你调用的是 MapConvertUtils.convertLatLngList，现在在这里直接实现
+     */
+    private fun parseDrivePath(drivePath: DrivePath): List<LatLng> {
+        val latLngs = ArrayList<LatLng>()
+        for (step in drivePath.steps) {
+            if (step.polyline != null && step.polyline.isNotEmpty()) {
+                for (point in step.polyline) {
+                    latLngs.add(LatLng(point.latitude, point.longitude))
+                }
+            }
+        }
+        return latLngs
     }
 }

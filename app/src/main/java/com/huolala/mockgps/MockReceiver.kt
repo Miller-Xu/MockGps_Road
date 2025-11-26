@@ -3,18 +3,17 @@ package com.huolala.mockgps
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.graphics.Rect
 import android.os.Bundle
 import android.text.TextUtils
 import android.widget.Toast
-import com.baidu.mapapi.model.LatLng
-import com.baidu.mapapi.search.route.DrivingRouteLine
+// [修改1] 替换 LatLng
+import com.amap.api.maps.model.LatLng
+// [修改2] 替换路线对象 (这是高德驾车导航的路线对象)
+import com.amap.api.services.route.DrivePath
 import com.blankj.utilcode.util.LogUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.huolala.mockgps.manager.FloatingViewManger
 import com.huolala.mockgps.manager.SearchManager
-import com.huolala.mockgps.manager.utils.MapConvertUtils
-import com.huolala.mockgps.manager.utils.MapDrawUtils
 import com.huolala.mockgps.model.MockMessageModel
 import com.huolala.mockgps.model.NaviType
 import com.huolala.mockgps.model.PoiInfoModel
@@ -26,15 +25,7 @@ import com.huolala.mockgps.utils.Utils
 
 /**
  * @author jiayu.liu
- *
- *  Intent intentBroadcast = new Intent();
- *  intentBroadcast.setAction("com.huolala.mockgps.navi");
- *  intentBroadcast.putExtra("start", "116.419431,40.028795");
- *  intentBroadcast.putExtra("end", "116.409816,40.05139");
- *  //bd09   gps84   gcj02
- *  intentBroadcast.putExtra("type", "gcj02");
- *  sendBroadcast(intentBroadcast);
- *
+ * 修改适配高德地图 (AMap)
  */
 class MockReceiver : BroadcastReceiver() {
 
@@ -60,6 +51,7 @@ class MockReceiver : BroadcastReceiver() {
         }
         val start = intent.getStringExtra("start")
         val end = intent.getStringExtra("end")
+        // 默认认为是 gcj02 (因为高德用的就是这个)
         val type = intent.getStringExtra("type") ?: LocationUtils.gcj02
         LogUtils.dTag("mock", "mockGps接收到模拟定位广播-> start=$start , end=$end , type=$type")
         Utils.checkFloatWindow(context).let {
@@ -75,11 +67,15 @@ class MockReceiver : BroadcastReceiver() {
             var endLatLng: LatLng? = null
 
             try {
+                // [分析] 这里的逻辑是把外部传来的坐标统统转成 GCJ02
+                // 高德地图正是需要 GCJ02，所以这里的逻辑非常完美，不需要改算法
+                // 只需要确保 LatLng 是高德的对象即可
                 start!!.split(",").apply {
                     startLatLng = when (type) {
                         LocationUtils.bd09 -> {
                             val bd09ToGcj02 =
                                 LocationUtils.bd09ToGcj02(get(0).toDouble(), get(1).toDouble())
+                            // 注意：LocationUtils返回的是[lng, lat]，LatLng构造是(lat, lng)
                             LatLng(bd09ToGcj02[1], bd09ToGcj02[0])
                         }
 
@@ -90,6 +86,7 @@ class MockReceiver : BroadcastReceiver() {
                         }
 
                         else -> {
+                            // 默认为 gcj02，直接用
                             LatLng(get(1).toDouble(), get(0).toDouble())
                         }
                     }
@@ -138,13 +135,17 @@ class MockReceiver : BroadcastReceiver() {
                 uid = ""
             )
 
+            // [修改3] 这里的 SearchManagerListener 泛型需要改
+            // 原来是 List<DrivingRouteLine> (百度)
+            // 现在改为 List<DrivePath> (高德)
             SearchManager.INSTANCE.addSearchManagerListener(object : SearchManager.SearchManagerListener {
-                override fun onDrivingRouteResultLines(routeLines: List<DrivingRouteLine>?) {
+                // 注意：你必须去 SearchManager 里面把接口定义也改成 List<DrivePath>
+                override fun onDrivingRouteResultLines(routeLines: List<DrivePath>?) {
                     if (routeLines?.isEmpty() != false) {
                         ToastUtils.showShort("路线规划数据获取失败,请检测网络or数据是否正确!")
                         return
                     }
-                    //使用第一条路线
+                    // 使用第一条路线
                     SearchManager.INSTANCE.selectDriverLine(routeLines[0])
                     startMockServer(context, model)
                     SearchManager.INSTANCE.removeSearchManagerListener(this)
@@ -158,7 +159,6 @@ class MockReceiver : BroadcastReceiver() {
             )
         }
     }
-
 
     private fun startMockServer(context: Context, parcelable: MockMessageModel?) {
         //判断  为null先启动服务  悬浮窗需要
@@ -182,6 +182,4 @@ class MockReceiver : BroadcastReceiver() {
             }
         })
     }
-
-
 }

@@ -2,10 +2,12 @@ package com.huolala.mockgps.ui
 
 import android.content.Intent
 import android.graphics.Rect
-import android.os.*
+import android.os.Bundle
+import android.os.Parcelable
 import android.view.View
 import android.widget.Toast
-import com.baidu.mapapi.map.*
+// [修改1] 替换为高德地图包
+import com.amap.api.maps.AMap
 import com.blankj.utilcode.util.ClickUtils
 import com.blankj.utilcode.util.ConvertUtils
 import com.castiel.common.base.BaseActivity
@@ -14,21 +16,21 @@ import com.huolala.mockgps.R
 import com.huolala.mockgps.databinding.ActivityNaviBinding
 import com.huolala.mockgps.manager.FollowMode
 import com.huolala.mockgps.manager.MapLocationManager
-import com.huolala.mockgps.manager.utils.MapDrawUtils
 import com.huolala.mockgps.manager.SearchManager
+import com.huolala.mockgps.manager.utils.MapDrawUtils
 import com.huolala.mockgps.model.MockMessageModel
 import com.huolala.mockgps.model.NaviType
 import com.huolala.mockgps.server.GpsService
 import com.huolala.mockgps.utils.Utils
 
-// 【修改点1】：删除了 kotlinx.android.synthetic... 那个报错的引用
-
 /**
  * @author jiayu.liu
+ * 已适配高德地图 (AMap)
  */
 class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
     View.OnClickListener {
-    private lateinit var mBaiduMap: BaiduMap
+    // [修改2] 变量类型改为 AMap
+    private lateinit var aMap: AMap
     private var mNaviType: Int = NaviType.LOCATION
     private val mPadding: Int = ConvertUtils.dp2px(50f)
     private var mapLocationManager: MapLocationManager? = null
@@ -42,16 +44,21 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
     }
 
     override fun initView() {
-        // 【修改点2】：iv_back 改为 dataBinding.ivBack
         ClickUtils.applySingleDebouncing(dataBinding.ivBack, this)
 
-        // 【修改点3】：mapview 改为 dataBinding.mapview
-        mBaiduMap = dataBinding.mapview.map
-        dataBinding.mapview.showScaleControl(false)
-        dataBinding.mapview.showZoomControls(false)
-        mBaiduMap.uiSettings?.isCompassEnabled = false
+        // [修改3] 获取 AMap 对象
+        if (dataBinding.mapview.map == null) return
+        aMap = dataBinding.mapview.map
 
-        mBaiduMap.setOnMapLoadedCallback {
+        // [修改4] UI 设置 (缩放控件等在高德里是通过 UiSettings 控制的)
+        aMap.uiSettings?.let {
+            it.isScaleControlsEnabled = false // 隐藏比例尺
+            it.isZoomControlsEnabled = false  // 隐藏缩放按钮
+            it.isCompassEnabled = false       // 隐藏指南针
+        }
+
+        // [修改5] 地图加载回调 Callback -> Listener
+        aMap.setOnMapLoadedListener {
             startMock()
         }
     }
@@ -66,10 +73,11 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
         }
         with(model) {
             this@MockLocationActivity.mNaviType = naviType
-            //开启定位小蓝点展示
+            // 开启定位小蓝点展示
+            // [修改6] 传入 aMap 对象
             mapLocationManager = MapLocationManager(
                 this@MockLocationActivity,
-                mBaiduMap,
+                aMap,
                 if (mNaviType == NaviType.LOCATION) FollowMode.MODE_PERSISTENT else FollowMode.MODE_NONE
             )
             when (naviType) {
@@ -87,28 +95,35 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
                             pickPoiError()
                             return
                         }
-                        mBaiduMap.clear()
+                        // [修改7] 清空地图
+                        aMap.clear()
+
+                        // [修改8] 绘制 Marker 和 Line，传入 aMap
                         startNavi?.latLng?.let { start ->
-                            MapDrawUtils.drawMarkerToMap(mBaiduMap, start, "marker_start.png")
+                            MapDrawUtils.drawMarkerToMap(aMap, start, "marker_start.png")
                         } ?: run {
-                            MapDrawUtils.drawMarkerToMap(mBaiduMap, it[0], "marker_start.png")
+                            MapDrawUtils.drawMarkerToMap(aMap, it[0], "marker_start.png")
                         }
-                        wayNaviList?.map {
-                            it.latLng?.let { latLng ->
-                                MapDrawUtils.drawMarkerToMap(mBaiduMap, latLng, "marker_way.png")
+
+                        wayNaviList?.map { way ->
+                            way.latLng?.let { latLng ->
+                                MapDrawUtils.drawMarkerToMap(aMap, latLng, "marker_way.png")
                             }
                         }
+
                         endNavi?.latLng?.let { end ->
-                            MapDrawUtils.drawMarkerToMap(mBaiduMap, end, "marker_end.png")
+                            MapDrawUtils.drawMarkerToMap(aMap, end, "marker_end.png")
                         } ?: run {
                             MapDrawUtils.drawMarkerToMap(
-                                mBaiduMap,
+                                aMap,
                                 it[it.size - 1],
                                 "marker_end.png"
                             )
                         }
+
+                        // 绘制路线
                         MapDrawUtils.drawLineToMap(
-                            mBaiduMap,
+                            aMap,
                             it,
                             Rect(mPadding, mPadding, mPadding, mPadding)
                         )
@@ -146,18 +161,19 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
 
         // 启动服务  定位以及悬浮窗
         val serviceIntent = Intent(this, GpsService::class.java).apply {
-            // 1. 传递原有的位置信息
             parcelable?.let {
                 putExtras(Bundle().apply {
                     putParcelable("info", it)
                 })
             }
 
-            // --- 【核心转发逻辑】 ---
             val captureMode = this@MockLocationActivity.intent.getBooleanExtra("is_capture_mode", false)
             if (captureMode) {
                 putExtra("is_capture_mode", true)
-                putExtra("projection_data", this@MockLocationActivity.intent.getParcelableExtra<Intent>("projection_data"))
+                putExtra(
+                    "projection_data",
+                    this@MockLocationActivity.intent.getParcelableExtra<Intent>("projection_data")
+                )
             }
         }
 
@@ -166,13 +182,11 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
 
     override fun onResume() {
         super.onResume()
-        // 【修改点4】：mapview 改为 dataBinding.mapview
         dataBinding.mapview.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        // 【修改点5】：mapview 改为 dataBinding.mapview
         dataBinding.mapview.onPause()
         if (isFinishing) {
             destroy()
@@ -181,13 +195,11 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
 
     private fun destroy() {
         mapLocationManager?.onDestroy()
-        // 【修改点6】：mapview 改为 dataBinding.mapview
         dataBinding.mapview.onDestroy()
     }
 
     override fun onClick(v: View?) {
         when (v) {
-            // 【修改点7】：iv_back 改为 dataBinding.ivBack
             dataBinding.ivBack -> {
                 finish()
             }

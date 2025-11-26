@@ -17,8 +17,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.baidu.mapapi.model.LatLng
-import com.baidu.mapapi.search.route.DrivingRouteLine
+// [修改1] 导入高德相关类
+import com.amap.api.maps.model.LatLng
+import com.amap.api.services.route.DrivePath
 import com.blankj.utilcode.util.ClipboardUtils
 import com.blankj.utilcode.util.ConvertUtils
 import com.blankj.utilcode.util.PermissionUtils
@@ -40,15 +41,14 @@ import com.huolala.mockgps.utils.Utils
 import com.huolala.mockgps.utils.WarnDialogUtils
 import com.huolala.mockgps.viewmodel.HomeViewModel
 import com.huolala.mockgps.widget.GuideView
-import com.huolala.mockgps.widget.InputLatLngDialog
 import com.huolala.mockgps.widget.MapSelectDialog
 import com.huolala.mockgps.widget.NaviPopupWindow
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-
 /**
  * @author jiayu.liu
+ * 已适配高德地图 (AMap)
  */
 class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.OnClickListener {
     private var topMarginOffset: Int = 0
@@ -57,8 +57,10 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
     private var mMapSelectDialog: MapSelectDialog? = null
     private var locationAlwaysView: View? = null
     private lateinit var poiAdapter: MultiplePoiAdapter
+
+    // [修改2] 回调泛型改为 DrivePath
     private val mSearchManagerListener = object : SearchManager.SearchManagerListener {
-        override fun onDrivingRouteResultLines(routeLines: List<DrivingRouteLine>?) {
+        override fun onDrivingRouteResultLines(routeLines: List<DrivePath>?) {
             viewModel.loading.value = false
             if (routeLines?.isEmpty() != false) {
                 ToastUtils.showShort("路线规划数据获取失败,请检测网络or数据是否正确!")
@@ -84,6 +86,8 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
             if (routeLines.size == 1) {
                 goToMockLocation(routeLines[0], model)
             } else {
+                // [修改3] MapSelectDialog 也需要适配高德的 DrivePath
+                // 这里的参数需要根据修改后的 MapSelectDialog 调整
                 mMapSelectDialog = MapSelectDialog(
                     this@MainActivity,
                     routeLines,
@@ -92,7 +96,8 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
                     wayList
                 ).apply {
                     listener = object : MapSelectDialog.MapSelectDialogListener {
-                        override fun onSelectLine(routeLine: DrivingRouteLine) {
+                        // 回调也是 DrivePath
+                        override fun onSelectLine(routeLine: DrivePath) {
                             goToMockLocation(routeLine, model)
                             mMapSelectDialog = null
                         }
@@ -228,8 +233,9 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
         })
     }
 
+    // [修改4] 参数类型改为 DrivePath
     private fun goToMockLocation(
-        routeLine: DrivingRouteLine,
+        routeLine: DrivePath,
         model: MockMessageModel
     ) {
         SearchManager.INSTANCE.selectDriverLine(routeLine)

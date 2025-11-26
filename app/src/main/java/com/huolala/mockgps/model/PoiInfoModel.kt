@@ -3,7 +3,8 @@ package com.huolala.mockgps.model
 import android.os.Parcel
 import android.os.Parcelable
 import androidx.annotation.IntDef
-import com.baidu.mapapi.model.LatLng
+//import com.baidu.mapapi.model.LatLng
+import com.amap.api.maps.model.LatLng
 
 
 @IntDef(PoiInfoType.DEFAULT, PoiInfoType.LOCATION, PoiInfoType.NAVI_START, PoiInfoType.NAVI_END)

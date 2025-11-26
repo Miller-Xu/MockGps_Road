@@ -11,17 +11,21 @@ import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import com.baidu.mapapi.map.*
-import com.baidu.mapapi.model.LatLng
-import com.baidu.mapapi.search.core.SearchResult
-import com.baidu.mapapi.search.geocode.*
-import com.huolala.mockgps.model.PoiInfoModel
-
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.baidu.mapapi.search.sug.OnGetSuggestionResultListener
-import com.baidu.mapapi.search.sug.SuggestionResult
-import com.baidu.mapapi.search.sug.SuggestionSearch
-import com.baidu.mapapi.search.sug.SuggestionSearchOption
+// [修改1] 导入高德地图相关包
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.CameraPosition
+import com.amap.api.maps.model.LatLng
+import com.amap.api.services.core.LatLonPoint
+import com.amap.api.services.geocoder.GeocodeResult
+import com.amap.api.services.geocoder.GeocodeSearch
+import com.amap.api.services.geocoder.GeocodeSearch.OnGeocodeSearchListener
+import com.amap.api.services.geocoder.RegeocodeQuery
+import com.amap.api.services.geocoder.RegeocodeResult
+import com.amap.api.services.help.Inputtips
+import com.amap.api.services.help.InputtipsQuery
+import com.amap.api.services.help.Tip
 import com.blankj.utilcode.util.KeyboardUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.castiel.common.base.BaseActivity
@@ -32,25 +36,26 @@ import com.huolala.mockgps.adaper.SimpleDividerDecoration
 import com.huolala.mockgps.databinding.ActivityPickBinding
 import com.huolala.mockgps.manager.FollowMode
 import com.huolala.mockgps.manager.MapLocationManager
+import com.huolala.mockgps.model.PoiInfoModel
 import com.huolala.mockgps.model.PoiInfoType
 import com.huolala.mockgps.widget.InputLatLngDialog
 import kotlinx.android.synthetic.main.activity_pick.*
 import java.lang.ref.WeakReference
 
-
 /**
  * @author jiayu.liu
+ * 已适配高德地图 (AMap)
  */
 class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
     View.OnClickListener {
     private val REVERSE_GEO_CODE = 0
-    private val DEFAULT_DELAYED: Long = 100
-    private lateinit var mBaiduMap: BaiduMap
-    private lateinit var mCoder: GeoCoder
+    private val DEFAULT_DELAYED: Long = 300 // 高德地图拖动停止判定建议稍微长一点
+    private lateinit var aMap: AMap // [修改] 变量名改为 aMap 更符合习惯
+    private lateinit var mGeocodeSearch: GeocodeSearch // [修改] 高德逆地理编码
     private var mInputLatLngDialog: InputLatLngDialog? = null
     private var poiListAdapter: PoiListAdapter = PoiListAdapter()
     private var mPoiInfoModel: PoiInfoModel? = null
-    private var mSuggestionSearch: SuggestionSearch = SuggestionSearch.newInstance()
+    // [修改] 高德不需要 SuggestionSearch 对象，直接 Inputtips(context, query).requestInputtipsAsyn()
     private var mHandler: PickMapPoiHandler? = null
     private var mapLocationManager: MapLocationManager? = null
     private var mIndex = -1
@@ -58,25 +63,32 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
     @PoiInfoType
     private var poiInfoType: Int = PoiInfoType.DEFAULT
 
-    //检索
-    private val listener: OnGetSuggestionResultListener =
-        OnGetSuggestionResultListener { suggestionResult -> //处理sug检索结果
-            if (et_search.visibility == View.VISIBLE && !TextUtils.isEmpty(et_search.text)) {
-                suggestionResult.allSuggestions?.let {
-                    poiListAdapter.setData(it)
-                    recycler.visibility = View.VISIBLE
+    // [修改] 检索监听器：Inputtips.InputtipsListener
+    private val inputTipsListener: Inputtips.InputtipsListener =
+        Inputtips.InputtipsListener { tipList, rCode ->
+            if (rCode == 1000) { // 1000 表示成功
+                if (et_search.visibility == View.VISIBLE && !TextUtils.isEmpty(et_search.text)) {
+                    tipList?.let {
+                        // 过滤掉经纬度为空的提示（有些只是建议词，没坐标）
+                        val validTips = it.filter { tip -> tip.point != null }.toMutableList()
+                        poiListAdapter.setData(validTips)
+                        recycler.visibility = View.VISIBLE
+                    }
                 }
+            } else {
+                // ToastUtils.showShort("搜索失败，错误码：$rCode")
             }
         }
 
+    // [修改] 逆地理编码
     private fun reverseGeoCode(latLng: LatLng?) {
         latLng?.let {
-            mCoder.reverseGeoCode(
-                ReverseGeoCodeOption()
-                    .location(it)
-                    .newVersion(1)
-                    .radius(500)
+            val query = RegeocodeQuery(
+                LatLonPoint(it.latitude, it.longitude),
+                200f, // 范围半径
+                GeocodeSearch.AMAP // 坐标系类型
             )
+            mGeocodeSearch.getFromLocationAsyn(query)
         }
     }
 
@@ -100,25 +112,28 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
         recycler.addItemDecoration(SimpleDividerDecoration(this))
         recycler.itemAnimator = null
 
+        // [修改] Adapter 点击事件回调 Tip 对象
         poiListAdapter.setOnItemClickListener(object : PoiListAdapter.OnItemClickListener {
-            override fun onItemClick(poiInfo: SuggestionResult.SuggestionInfo) {
+            override fun onItemClick(poiInfo: Tip) {
                 poiInfo.run {
-                    if (pt == null) {
+                    if (point == null) {
                         return@run
                     }
+                    // Tip 中的 point 是 LatLonPoint，需转为 LatLng
+                    val latLng = LatLng(point.latitude, point.longitude)
                     this@PickMapPoiActivity.mPoiInfoModel = PoiInfoModel(
-                        pt,
-                        poiInfo.uid,
-                        key,
+                        latLng,
+                        poiID, // uid -> poiID
+                        name,  // key -> name
                         poiInfoType,
-                        city
+                        district // city -> district
                     )
-                    tv_poi_name.text = key
-                    tv_lonlat.text = pt?.toString()
+                    tv_poi_name.text = name
+                    tv_lonlat.text = latLng.toString()
                     editViewShow(false)
                     mHandler = null
-                    changeCenterLatLng(pt.latitude, pt.longitude)
-                    dataBinding.city = city
+                    changeCenterLatLng(latLng.latitude, latLng.longitude)
+                    dataBinding.city = district
                 }
             }
         })
@@ -132,18 +147,19 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
 
             override fun afterTextChanged(s: Editable?) {
                 if (!TextUtils.isEmpty(s)) {
-                    mSuggestionSearch.requestSuggestion(
-                        SuggestionSearchOption()
-                            .city(if (et_search_city.text?.isNotEmpty() == true) et_search_city.text.toString() else "中国")
-                            .keyword(s.toString()) //必填
-                    )
+                    // [修改] 发起高德输入提示搜索
+                    val keyword = s.toString()
+                    val city = if (et_search_city.text?.isNotEmpty() == true) et_search_city.text.toString() else ""
+                    val query = InputtipsQuery(keyword, city)
+                    query.cityLimit = false // 是否限制在当前城市
+                    val inputTips = Inputtips(this@PickMapPoiActivity, query)
+                    inputTips.setInputtipsListener(inputTipsListener)
+                    inputTips.requestInputtipsAsyn()
                 } else {
                     poiListAdapter.setData(null)
                     recycler.visibility = View.GONE
                 }
-
             }
-
         })
         initMap()
     }
@@ -156,52 +172,60 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
     }
 
     private fun initMap() {
-        mBaiduMap = mapview.map
+        // [修改] 获取 AMap 对象
+        if (mapview.map == null) {
+            // 防止地图未加载时崩溃
+            return
+        }
+        aMap = mapview.map
 
-        mBaiduMap.uiSettings?.run {
+        aMap.uiSettings?.run {
             isRotateGesturesEnabled = false
-            isOverlookingGesturesEnabled = false
-            setEnlargeCenterWithDoubleClickEnable(true)
+            isTiltGesturesEnabled = false // 高德叫 Tilt (倾斜)，对应百度的 Overlooking (俯视)
+            // 高德没有直接的双击放大中心开关，默认开启
         }
 
-        mCoder = GeoCoder.newInstance()
-        mCoder.setOnGetGeoCodeResultListener(object : OnGetGeoCoderResultListener {
-            override fun onGetGeoCodeResult(geoCodeResult: GeoCodeResult?) {
+        // [修改] 初始化 GeocodeSearch
+        mGeocodeSearch = GeocodeSearch(this)
+        mGeocodeSearch.setOnGeocodeSearchListener(object : OnGeocodeSearchListener {
+            override fun onRegeocodeSearched(result: RegeocodeResult?, rCode: Int) {
+                if (rCode == 1000) { // 1000表示成功
+                    result?.regeocodeAddress?.run {
+                        var name: String? = null
+                        // 优先取 AOI (兴趣面) 名称，其次取 POI，最后取格式化地址
+                        if (aois != null && aois.isNotEmpty()) {
+                            name = aois[0].aoiName
+                        } else if (pois != null && pois.isNotEmpty()) {
+                            name = pois[0].title
+                        }
 
+                        if (TextUtils.isEmpty(name)) {
+                            name = formatAddress ?: "未知地址"
+                        }
+
+                        dataBinding.city = city ?: "北京市"
+
+                        // 获取中心点坐标
+                        // 这里 result.regeocodeQuery.point 是查询点，直接用地图中心点更准
+                        val center = aMap.cameraPosition.target
+
+                        mPoiInfoModel = PoiInfoModel(
+                            center,
+                            "", // 逆地理没有直接的 uid
+                            name,
+                            poiInfoType,
+                            city ?: "北京市"
+                        )
+                        tv_poi_name.text = name
+                        tv_lonlat.text = center.toString()
+                    }
+                } else {
+                    Toast.makeText(this@PickMapPoiActivity, "逆地理编码失败:$rCode", Toast.LENGTH_SHORT).show()
+                }
             }
 
-            override fun onGetReverseGeoCodeResult(reverseGeoCodeResult: ReverseGeoCodeResult?) {
-                reverseGeoCodeResult?.run {
-                    if (error != SearchResult.ERRORNO.NO_ERROR) {
-                        Toast.makeText(
-                            this@PickMapPoiActivity,
-                            "逆地理编码失败",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        return
-                    }
-                    var name: String? = null
-
-                    poiRegionsInfoList?.get(0)?.run {
-                        name = regionName
-                    }
-
-                    if (TextUtils.isEmpty(name)) {
-                        name =
-                            if (!TextUtils.isEmpty(sematicDescription)) sematicDescription
-                            else if (!TextUtils.isEmpty(address)) address else "未知地址"
-                    }
-                    dataBinding.city = addressDetail?.city ?: "北京市"
-                    mPoiInfoModel = PoiInfoModel(
-                        location,
-                        location.toString(),
-                        name,
-                        poiInfoType,
-                        addressDetail?.city ?: "北京市"
-                    )
-                    tv_poi_name.text = name
-                    tv_lonlat.text = location?.toString()
-                }
+            override fun onGeocodeSearched(p0: GeocodeResult?, p1: Int) {
+                // 正向地理编码（地址转坐标），这里不需要处理
             }
         })
 
@@ -222,24 +246,19 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
         }
 
         //设置locationClientOption
-        mapLocationManager = MapLocationManager(this, mBaiduMap, follow)
-        mSuggestionSearch.setOnGetSuggestionResultListener(listener)
+        mapLocationManager = MapLocationManager(this, aMap, follow)
+        // inputTipsListener 在上面定义了，这里不需要单独 set
 
-        mBaiduMap.setOnMapStatusChangeListener(object : BaiduMap.OnMapStatusChangeListener {
-            override fun onMapStatusChangeStart(mapStatus: MapStatus?) {
-            }
-
-            override fun onMapStatusChangeStart(mapStatus: MapStatus?, reason: Int) {
+        // [修改] 地图状态监听
+        aMap.setOnCameraChangeListener(object : AMap.OnCameraChangeListener {
+            override fun onCameraChange(position: CameraPosition?) {
                 mHandler?.removeMessages(REVERSE_GEO_CODE)
                 editViewShow(false)
             }
 
-            override fun onMapStatusChange(mapStatus: MapStatus?) {
-            }
-
-            override fun onMapStatusChangeFinish(mapStatus: MapStatus?) {
-                val latLng = mapStatus?.target
-                mBaiduMap.clear()
+            override fun onCameraChangeFinish(position: CameraPosition?) {
+                val latLng = position?.target
+                aMap.clear()
                 mHandler?.removeMessages(REVERSE_GEO_CODE)
                 mHandler?.sendMessageDelayed(Message.obtain().apply {
                     what = REVERSE_GEO_CODE
@@ -255,12 +274,10 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
 
     private fun changeCenterLatLng(latitude: Double, longitude: Double) {
         if (latitude > 0.0 && longitude > 0.0) {
-            mBaiduMap.animateMapStatus(
-                MapStatusUpdateFactory.newLatLngZoom(
-                    LatLng(
-                        latitude,
-                        longitude
-                    ), 16f
+            // [修改] 移动相机
+            aMap.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(latitude, longitude), 16f
                 )
             )
         }
@@ -281,8 +298,7 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
 
     private fun destroy() {
         mapLocationManager?.onDestroy()
-        mSuggestionSearch.destroy()
-        mCoder.destroy()
+        // 高德 GeocodeSearch 没有 destroy 方法
         mapview.onDestroy()
     }
 
@@ -317,8 +333,11 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
             }
 
             R.id.iv_cur_location -> {
-                mBaiduMap.locationData?.run {
-                    changeCenterLatLng(latitude, longitude)
+                // [修改] 获取当前定位点
+                if (aMap.myLocation != null) {
+                    changeCenterLatLng(aMap.myLocation.latitude, aMap.myLocation.longitude)
+                } else {
+                    ToastUtils.showShort("正在定位中...")
                 }
             }
 

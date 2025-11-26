@@ -12,7 +12,7 @@ import android.net.Uri
 
 import android.os.Build
 import android.provider.Settings
-import com.baidu.mapapi.model.LatLng
+import com.amap.api.maps.model.LatLng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.lang.IllegalArgumentException

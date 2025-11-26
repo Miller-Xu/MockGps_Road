@@ -1,6 +1,6 @@
 package com.huolala.mockgps.utils;
 
-import com.baidu.mapapi.model.LatLng;
+import com.amap.api.maps.model.LatLng;
 
 import java.util.List;
 
