@@ -44,6 +44,7 @@ class MockLocationActivity : BaseActivity<ActivityNaviBinding, BaseViewModel>(),
     }
 
     override fun initView() {
+        dataBinding.mapview.onCreate(intent.extras)
         ClickUtils.applySingleDebouncing(dataBinding.ivBack, this)
 
         // [修改3] 获取 AMap 对象

@@ -115,6 +115,7 @@ class CalculateRouteActivity : BaseActivity<ActivityCalculateRouteBinding, BaseV
     }
 
     override fun initView() {
+        dataBinding.mapview.onCreate(intent.extras)
         initMap()
 
         ClickUtils.applySingleDebouncing(dataBinding.tvStart, this)

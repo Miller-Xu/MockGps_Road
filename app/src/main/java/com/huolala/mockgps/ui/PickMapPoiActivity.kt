@@ -101,6 +101,7 @@ class PickMapPoiActivity : BaseActivity<ActivityPickBinding, BaseViewModel>(),
     }
 
     override fun initView() {
+        dataBinding.mapview.onCreate(intent.extras)
         dataBinding.clicklistener = this
         dataBinding.isShowSearch = false
 
