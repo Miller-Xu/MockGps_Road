@@ -63,26 +63,40 @@ class ScreenCaptureManager(private val context: Context, private val mediaProjec
         }
     }
 
-    fun captureAndSave(lat: Double, lon: Double) {
-        val reader = imageReader ?: return
-        val image = reader.acquireLatestImage() ?: return
+    fun captureAndSave(lat: Double, lon: Double, onComplete: (() -> Unit)? = null) {
+        // 如果 reader 为空，直接回调并返回
+        if (imageReader == null) {
+            onComplete?.invoke()
+            return
+        }
+
+        // 尝试获取最新图片
+        val image = try {
+            imageReader?.acquireLatestImage()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+
+        // 如果获取不到图片（比如屏幕没刷新），必须回调让导航继续！
+        if (image == null) {
+            onComplete?.invoke()
+            return
+        }
 
         GlobalScope.launch(Dispatchers.IO) {
             try {
+                // ... 原有的保存图片逻辑不变 ...
                 val planes = image.planes
                 val buffer = planes[0].buffer
                 val pixelStride = planes[0].pixelStride
                 val rowStride = planes[0].rowStride
                 val rowPadding = rowStride - pixelStride * width
 
-                // 创建 Bitmap
                 val bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888)
                 bitmap.copyPixelsFromBuffer(buffer)
-
-                // 裁剪掉多余的 padding
                 val finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
 
-                // 保存文件
                 saveBitmapToDisk(finalBitmap, lat, lon)
 
                 bitmap.recycle()
@@ -90,7 +104,11 @@ class ScreenCaptureManager(private val context: Context, private val mediaProjec
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
-                image.close()
+                // 关闭 image
+                try { image.close() } catch (e: Exception) {}
+
+                // 无论成功还是报错，最后必须通知 Service 继续走！
+                onComplete?.invoke()
             }
         }
     }

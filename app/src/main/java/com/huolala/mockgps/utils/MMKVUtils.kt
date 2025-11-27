@@ -96,7 +96,7 @@ object MMKVUtils {
      * 获取导航速度
      */
     fun getSpeed(): Int {
-        return defaultMMKV.getInt(NAVI_SPEED_KEY, 60)
+        return defaultMMKV.getInt(NAVI_SPEED_KEY, 80)
     }
 
     /**

@@ -50,7 +50,7 @@ class GpsService : Service() {
     /**
      * 米/S
      */
-    private var mSpeed: Float = 60 / 3.6f
+    private var mSpeed: Float = 80 / 3.6f
     private var mCurrentLocation: LatLng? = null
     private var naviType: Int = NaviType.NONE
     private var isLocationAdjust = false
@@ -59,77 +59,111 @@ class GpsService : Service() {
      * 模拟导航点更新间隔  单位：ms  小于等于1000ms
      */
     private var mNaviUpdateValue = 1000L
+    // 【新增】用来持久保存路线数据，防止 msg 被回收后数据丢失
+    private var mCurrentRouteList: ArrayList<LatLng>? = null
 
     override fun onCreate() {
         super.onCreate()
         handle = object : Handler(Looper.getMainLooper()) {
             override fun handleMessage(msg: Message) {
-                //重置为默认值
+                // 【关键修复1】立即把消息类型存为局部变量！
+                // 防止 msg 被系统回收后，在回调里读到错误的 what
+                val currentMsgWhat = msg.what
+
                 mNaviUpdateValue = 1000L
-                when (msg.what) {
+
+                when (currentMsgWhat) { // 使用局部变量
                     START_MOCK_LOCATION -> {
                         if (isStart) {
-                            (msg.obj as PoiInfoModel?)?.latLng?.let {
+                            (msg.obj as? PoiInfoModel)?.latLng?.let {
                                 if (mCurrentLocation == it && isLocationQuiver()) {
                                     CalculationLogLatDistance.getRandomLatLng(
                                         it,
                                         MMKVUtils.getLocationVibrationValue().toDouble()
                                     ).apply {
-                                        //仅震动模式时，可以配置震动的频率
-                                        mNaviUpdateValue =
-                                            MMKVUtils.getLocationFrequencyValue() * 1000L
+                                        mNaviUpdateValue = MMKVUtils.getLocationFrequencyValue() * 1000L
                                         startSimulateLocation(this, true)
                                     }
                                 } else {
                                     mCurrentLocation = it
                                     startSimulateLocation(it, true)
                                 }
-                                handle.sendMessageDelayed(Message.obtain(msg), mNaviUpdateValue)
+                                val nextMsg = Message.obtain().apply {
+                                    what = currentMsgWhat // 使用局部变量
+                                    obj = msg.obj
+                                }
+                                handle.sendMessageDelayed(nextMsg, mNaviUpdateValue)
                             }
                         }
                     }
 
                     START_MOCK_NAVI, START_MOCK_FILE_NAVI -> {
                         if (isStart) {
-                            (msg.obj as ArrayList<*>?)?.let {
-                                if (it.isEmpty()) {
-                                    return
-                                }
-                                // ... 中间移动位置的代码保持不变 ...
+                            // 1. 数据源保护
+                            if (msg.obj is ArrayList<*>) {
+                                @Suppress("UNCHECKED_CAST")
+                                mCurrentRouteList = msg.obj as ArrayList<LatLng>
+                            }
+
+                            // 2. 核心逻辑
+                            mCurrentRouteList?.let { list ->
+                                if (list.isEmpty()) return
+
                                 if (index == 0) {
-                                    mCurrentLocation = it[index] as LatLng
+                                    mCurrentLocation = list[index]
                                     index++
-                                } else if (index < it.size) {
-                                    mCurrentLocation = getLatLngNext(it)
+                                } else if (index < list.size) {
+                                    mCurrentLocation = getLatLngNext(list)
                                 }
-                                FloatingViewManger.INSTANCE.updateNaviInfo(index, it.size)
+
+                                FloatingViewManger.INSTANCE.updateNaviInfo(index, list.size)
                                 startSimulateLocation(mCurrentLocation!!, false)
 
-                                // --- 【修改点 2：截图逻辑改为隔一个点截一次】 ---
-                                if (isCaptureMode) {
-                                    // 这里不需要强制 sleep 2秒了，因为是按点截图，速度由下面的 updateValue 决定
-                                    // 你可以根据需要调整这个值，或者保持默认
-                                    // mNaviUpdateValue = 2000L
+                                // --- 截图逻辑 ---
+                                val canCapture = isCaptureMode &&
+                                        (index >= 4) &&
+                                        (index < list.size - 4) &&
+                                        (index % 2 == 0) &&
+                                        (screenCaptureManager != null) &&
+                                        (mCurrentLocation != null)
 
-                                    // 核心逻辑：判断 index 的奇偶性
-                                    // 比如 index 为 2, 4, 6, 8 时截图 (每隔一个点)
-                                    if (index % 2 == 0) {
-                                        mCurrentLocation?.let { loc ->
-                                            screenCaptureManager?.captureAndSave(loc.latitude, loc.longitude)
+                                if (canCapture) {
+                                    var isResumed = false
+
+                                    // 定义下一步动作
+                                    fun sendNext() {
+                                        if (!isResumed && isStart) {
+                                            isResumed = true
+                                            val nextMsg = Message.obtain().apply {
+                                                // 【关键修复2】这里必须用 currentMsgWhat，绝对不能用 msg.what
+                                                // 因为此时 msg 对象可能已经被系统回收重置了
+                                                what = currentMsgWhat
+                                                obj = null
+                                            }
+                                            handle.sendMessageDelayed(nextMsg, 100L)
                                         }
                                     }
-                                }
-                                // --- 【修改结束】 ---
 
-                                handle.sendMessageDelayed(Message.obtain(msg), mNaviUpdateValue)
+                                    // 超时保底
+                                    handle.postDelayed({ sendNext() }, 2000L)
+
+                                    // 执行截图
+                                    screenCaptureManager?.captureAndSave(mCurrentLocation!!.latitude, mCurrentLocation!!.longitude) {
+                                        handle.post { sendNext() }
+                                    }
+                                } else {
+                                    // 不需要截图，直接走下一步
+                                    val nextMsg = Message.obtain().apply {
+                                        what = currentMsgWhat // 使用局部变量
+                                        obj = null
+                                    }
+                                    handle.sendMessageDelayed(nextMsg, mNaviUpdateValue)
+                                }
                             }
                         }
                     }
-
-                    else -> {
-                    }
+                    else -> {}
                 }
-
             }
         }
         initLocationManager()
