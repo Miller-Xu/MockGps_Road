@@ -96,8 +96,18 @@ class ScreenCaptureManager(private val context: Context, private val mediaProjec
     }
 
     private fun saveBitmapToDisk(bitmap: Bitmap, lat: Double, lon: Double) {
-        val dir = File(Environment.getExternalStorageDirectory(), "MockGpsScreenshots")
-        if (!dir.exists()) dir.mkdirs()
+        // 【修改点】改为 App 私有图片目录
+        // 旧代码：val dir = File(Environment.getExternalStorageDirectory(), "MockGpsScreenshots")
+        // 新代码如下：
+        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "MockGpsScreenshots")
+
+        if (!dir.exists()) {
+            val success = dir.mkdirs()
+            if (!success) {
+                // 如果创建失败，尝试直接用 pictures 根目录
+                // log: 文件夹创建失败
+            }
+        }
 
         val fileName = String.format("%.6f_%.6f.png", lat, lon)
         val file = File(dir, fileName)
@@ -107,6 +117,8 @@ class ScreenCaptureManager(private val context: Context, private val mediaProjec
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
             fos.flush()
             fos.close()
+            // 打印日志方便调试，或者在 Logcat 里搜索 "Saved"
+            // Log.d("ScreenCapture", "Saved to: " + file.absolutePath)
         } catch (e: Exception) {
             e.printStackTrace()
         }

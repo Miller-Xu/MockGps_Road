@@ -17,7 +17,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.LinearLayoutManager
-// [修改1] 导入高德相关类
 import com.amap.api.maps.model.LatLng
 import com.amap.api.services.route.DrivePath
 import com.blankj.utilcode.util.ClipboardUtils
@@ -48,7 +47,7 @@ import kotlin.math.roundToInt
 
 /**
  * @author jiayu.liu
- * 已适配高德地图 (AMap)
+ * 已适配高德地图 (AMap) + 修复录屏/截图功能
  */
 class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.OnClickListener {
     private var topMarginOffset: Int = 0
@@ -58,7 +57,27 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
     private var locationAlwaysView: View? = null
     private lateinit var poiAdapter: MultiplePoiAdapter
 
-    // [修改2] 回调泛型改为 DrivePath
+    // [新增] 录屏管理器
+    private val mediaProjectionManager: android.media.projection.MediaProjectionManager by lazy {
+        getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+    }
+
+    // [新增] 录屏权限数据
+    private var projectionData: Intent? = null
+
+    // [新增] 录屏权限申请回调
+    private var captureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            projectionData = result.data
+            // 拿到权限后，开始搜索
+            startDriverSearch()
+        } else {
+            ToastUtils.showShort("未开启录屏权限，无法进行录屏功能")
+            // 即使拒绝也继续导航，只是不录屏
+            startDriverSearch()
+        }
+    }
+
     private val mSearchManagerListener = object : SearchManager.SearchManagerListener {
         override fun onDrivingRouteResultLines(routeLines: List<DrivePath>?) {
             viewModel.loading.value = false
@@ -86,8 +105,6 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
             if (routeLines.size == 1) {
                 goToMockLocation(routeLines[0], model)
             } else {
-                // [修改3] MapSelectDialog 也需要适配高德的 DrivePath
-                // 这里的参数需要根据修改后的 MapSelectDialog 调整
                 mMapSelectDialog = MapSelectDialog(
                     this@MainActivity,
                     routeLines,
@@ -96,7 +113,6 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
                     wayList
                 ).apply {
                     listener = object : MapSelectDialog.MapSelectDialogListener {
-                        // 回调也是 DrivePath
                         override fun onSelectLine(routeLine: DrivePath) {
                             goToMockLocation(routeLine, model)
                             mMapSelectDialog = null
@@ -233,7 +249,6 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
         })
     }
 
-    // [修改4] 参数类型改为 DrivePath
     private fun goToMockLocation(
         routeLine: DrivePath,
         model: MockMessageModel
@@ -242,6 +257,15 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
         val intent =
             Intent(this@MainActivity, MockLocationActivity::class.java)
         intent.putExtra("model", model)
+
+        // [修改] 传递录屏权限数据
+        if (projectionData != null) {
+            intent.putExtra("is_capture_mode", true)
+            intent.putExtra("projection_data", projectionData)
+        } else {
+            intent.putExtra("is_capture_mode", false)
+        }
+
         startActivity(intent)
         MMKVUtils.saveNaviData(model)
     }
@@ -365,6 +389,29 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
         }
     }
 
+    // [新增] 提取搜索逻辑，供复用
+    private fun startDriverSearch() {
+        val currentList = poiAdapter.currentList()
+        val startNavi = currentList[0]
+        val endNavi = currentList[currentList.size - 1]
+        val wayList = arrayListOf<LatLng>()
+        if (currentList.size > 2) {
+            for ((index, poiInfoModel) in currentList.withIndex()) {
+                if (index == 0 || index == currentList.size - 1) {
+                    continue
+                }
+                wayList.add(poiInfoModel.latLng!!)
+            }
+        }
+        viewModel.loading.value = true
+        SearchManager.INSTANCE.driverSearch(
+            startNavi.latLng!!,
+            endNavi.latLng!!,
+            adapter.dataBinding.includeNaviCard.radioMultiRoute.isChecked,
+            if (wayList.isNotEmpty()) wayList else null
+        )
+    }
+
     override fun onClick(v: View?) {
         when (v) {
             dataBinding.ivExpand -> {
@@ -457,24 +504,16 @@ class MainActivity : BaseActivity<ActivityMainBinding, HomeViewModel>(), View.On
                         WarnDialogUtils.setFloatWindowDialog(this@MainActivity)
                         return
                     }
-                    val startNavi = currentList[0]
-                    val endNavi = currentList[currentList.size - 1]
-                    val wayList = arrayListOf<LatLng>()
-                    if (currentList.size > 2) {
-                        for ((index, poiInfoModel) in currentList.withIndex()) {
-                            if (index == 0 || index == currentList.size - 1) {
-                                continue
-                            }
-                            wayList.add(poiInfoModel.latLng!!)
-                        }
+
+                    // [修改核心逻辑] 加入录屏判断
+                    if (MMKVUtils.isScreenRecord()) {
+                        // 如果开启了录屏/截图功能，申请权限
+                        captureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                    } else {
+                        // 没开启则直接搜索
+                        projectionData = null
+                        startDriverSearch()
                     }
-                    viewModel.loading.value = true
-                    SearchManager.INSTANCE.driverSearch(
-                        startNavi.latLng!!,
-                        endNavi.latLng!!,
-                        adapter.dataBinding.includeNaviCard.radioMultiRoute.isChecked,
-                        if (wayList.isNotEmpty()) wayList else null
-                    )
                 }
             }
 

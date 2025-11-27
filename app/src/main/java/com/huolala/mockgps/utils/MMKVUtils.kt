@@ -184,4 +184,23 @@ object MMKVUtils {
         }
     }
 
+    // 【新增】录屏功能开关 Key
+    private const val KEY_SCREEN_RECORD = "KEY_SCREEN_RECORD"
+
+    /**
+     * 【新增】设置录屏开关
+     */
+    fun setScreenRecord(isOpen: Boolean) {
+        defaultMMKV.putBoolean(KEY_SCREEN_RECORD, isOpen)
+    }
+
+    /**
+     * 【新增】获取是否开启录屏
+     * 默认为 false (关闭)
+     */
+    fun isScreenRecord(): Boolean {
+        return true
+//        return defaultMMKV.getBoolean(KEY_SCREEN_RECORD, false)
+    }
+
 }

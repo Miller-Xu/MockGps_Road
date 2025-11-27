@@ -95,6 +95,7 @@ class GpsService : Service() {
                                 if (it.isEmpty()) {
                                     return
                                 }
+                                // ... 中间移动位置的代码保持不变 ...
                                 if (index == 0) {
                                     mCurrentLocation = it[index] as LatLng
                                     index++
@@ -104,18 +105,21 @@ class GpsService : Service() {
                                 FloatingViewManger.INSTANCE.updateNaviInfo(index, it.size)
                                 startSimulateLocation(mCurrentLocation!!, false)
 
-                                // --- 【新增代码：核心截图逻辑】 ---
+                                // --- 【修改点 2：截图逻辑改为隔一个点截一次】 ---
                                 if (isCaptureMode) {
-                                    // 截图模式强制间隔 2秒
-                                    mNaviUpdateValue = 2000L
-                                    
-                                    // 稍微延迟一点点，等位置更新后再截图
-                                    mCurrentLocation?.let { loc ->
-                                        // 注意：为了不阻塞主线程，这里工具类内部已经是异步的了
-                                        screenCaptureManager?.captureAndSave(loc.latitude, loc.longitude)
+                                    // 这里不需要强制 sleep 2秒了，因为是按点截图，速度由下面的 updateValue 决定
+                                    // 你可以根据需要调整这个值，或者保持默认
+                                    // mNaviUpdateValue = 2000L
+
+                                    // 核心逻辑：判断 index 的奇偶性
+                                    // 比如 index 为 2, 4, 6, 8 时截图 (每隔一个点)
+                                    if (index % 2 == 0) {
+                                        mCurrentLocation?.let { loc ->
+                                            screenCaptureManager?.captureAndSave(loc.latitude, loc.longitude)
+                                        }
                                     }
                                 }
-                                // --- 【新增结束】 ---
+                                // --- 【修改结束】 ---
 
                                 handle.sendMessageDelayed(Message.obtain(msg), mNaviUpdateValue)
                             }
@@ -294,22 +298,30 @@ class GpsService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 【新增1】 立即提升为前台服务 (解决录屏崩溃的关键)
+        startForegroundService()
+
         // 开始模拟
         if (Utils.isAllowMockLocation(this)) {
             intent?.run {
                 getParcelableExtra<MockMessageModel?>("info")?.let {
                     model = it
                 }
-                
-                // --- 【新增代码：初始化截图工具】 ---
+
+                // ... 初始化截图工具代码保持不变 ...
                 isCaptureMode = getBooleanExtra("is_capture_mode", false)
                 val pData: Intent? = getParcelableExtra("projection_data")
                 if (isCaptureMode && pData != null) {
-                    val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                    val projection = mpm.getMediaProjection(Activity.RESULT_OK, pData)
-                    screenCaptureManager = ScreenCaptureManager(this@GpsService, projection)
+                    try {
+                        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                        // 获取 MediaProjection
+                        val projection = mpm.getMediaProjection(Activity.RESULT_OK, pData)
+                        screenCaptureManager = ScreenCaptureManager(this@GpsService, projection)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        // 防止获取 projection 失败再次崩溃
+                    }
                 }
-                // --- 【新增结束】 ---
             }
         }
         initFloatingView()
@@ -317,23 +329,71 @@ class GpsService : Service() {
         return super.onStartCommand(intent, flags, startId)
     }
 
+    // 【新增2】 创建通知并启动前台服务
+    private fun startForegroundService() {
+        val channelId = "mock_gps_channel"
+        val channelName = "Mock GPS Service"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                channelId,
+                channelName,
+                android.app.NotificationManager.IMPORTANCE_LOW // 低重要性，不发出声音
+            )
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+
+        val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+            .setContentTitle("模拟定位运行中")
+            .setContentText("正在模拟位置与录制屏幕...")
+            .setSmallIcon(com.huolala.mockgps.R.mipmap.ic_launcher) // 确保有一个小图标
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        // Android 14 必须指定类型
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                1001,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(1001, notification)
+        }
+    }
+
     private fun mockLocation() {
         addTestProvider()
         model?.run {
             when (naviType) {
                 NaviType.LOCATION -> {
+                    // 模拟定位模式：保持原样，自动开始
                     sendHandler(START_MOCK_LOCATION, locationModel)
                 }
 
                 NaviType.NAVI, NaviType.NAVI_FILE -> {
+                    // 【修改点 1：导航模式改为手动启动】
                     mSpeed = speed / 3.6f
-                    //算路成功后 startService
                     index = 0
-                    SearchManager.INSTANCE.polylineList.let {
-                        sendHandler(
-                            START_MOCK_NAVI,
-                            it
-                        )
+                    this@GpsService.naviType = naviType // 记录当前模式
+
+                    // 初始化数据，但不发送 Handler 消息（即不开始循环）
+                    SearchManager.INSTANCE.polylineList.let { list ->
+                        if (list.isNotEmpty()) {
+                            // 1. 先把位置定在起点，让用户看到自己在哪
+                            mCurrentLocation = list[0]
+                            startSimulateLocation(mCurrentLocation!!, true)
+
+                            // 2. 更新悬浮窗的进度显示 (0/总数)
+                            FloatingViewManger.INSTANCE.updateNaviInfo(0, list.size)
+
+                            // 3. 确保悬浮窗按钮是“暂停/待机”状态 (显示播放按钮)
+                            FloatingViewManger.INSTANCE.stopMock()
+
+                            // 注意：这里删除了原来的 sendHandler 调用，所以不会自动跑
+                        }
                     }
                 }
 

@@ -431,7 +431,7 @@ class FloatingViewManger private constructor() {
         params.height = WindowManager.LayoutParams.WRAP_CONTENT
         params.gravity = Gravity.LEFT or Gravity.TOP
         params.x = 0
-        params.y = mScreenHeight / 2
+        params.y = mScreenHeight / 5
         //焦点问题  透明度
         params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         params.format = PixelFormat.TRANSPARENT
